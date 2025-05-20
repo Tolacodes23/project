@@ -1,0 +1,76 @@
+# train_xgb.py
+
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import confusion_matrix, classification_report
+import xgboost as xgb
+
+def load_and_preprocess(path):
+    # 1. Load
+    df = pd.read_csv(path)
+
+    # 2. Parse timestamps & extract features
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='%m/%d/%Y %H:%M', errors='coerce')
+    df['Hour']      = df['Timestamp'].dt.hour
+    df['DayOfWeek'] = df['Timestamp'].dt.dayofweek
+    df.drop('Timestamp', axis=1, inplace=True)
+
+    # 3. Drop identifiers
+    df.drop(['Transaction_ID', 'User_ID', 'IP_Address_Flag'], axis=1, inplace=True)
+
+    # 4. Impute missing values
+    #   a) Numeric → mean
+    num_cols = df.select_dtypes(include=[np.number]).columns
+    df[num_cols] = df[num_cols].fillna(df[num_cols].mean())
+    #   b) Categorical → mode
+    cat_cols = df.select_dtypes(include=['object']).columns
+    for c in cat_cols:
+        df[c].fillna(df[c].mode()[0], inplace=True)
+
+    # 5. Encode categoricals
+    le = LabelEncoder()
+    for c in cat_cols:
+        df[c] = le.fit_transform(df[c])
+
+    # 6. Split features/target
+    X = df.drop('Fraud_Label', axis=1)
+    y = df['Fraud_Label'].astype(int)
+
+    return X, y
+
+def main():
+    # Load & preprocess
+    X, y = load_and_preprocess('dataset.csv')
+
+    # Train/test split (stratified)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y,
+        test_size=0.2,
+        random_state=42,
+        stratify=y
+    )
+
+    # Train XGBoost
+    model = xgb.XGBClassifier(
+        use_label_encoder=False,
+        eval_metric='logloss',
+        n_estimators=100,
+        max_depth=5,
+        learning_rate=0.1,
+        random_state=42
+    )
+    model.fit(X_train, y_train)
+
+    # Predict & evaluate
+    y_pred = model.predict(X_test)
+
+    print("=== Confusion Matrix ===")
+    print(confusion_matrix(y_test, y_pred))
+
+    print("\n=== Classification Report ===")
+    print(classification_report(y_test, y_pred, digits=4))
+
+if __name__ == '__main__':
+    main()
